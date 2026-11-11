@@ -1,12 +1,12 @@
 # Christmas Pinball — By Henry :)
 
-Open `index.html` in a modern browser to play. This is a self-contained game with no dependencies.
+Open `index.html` in a modern browser to play; there are no dependencies.
 
 ## Controls
-- Left Arrow / A: hold the left flipper
-- Right Arrow / D: hold the right flipper
-- Hold and release Space (or the Launch button) to serve; holding longer charges the plunger
+- Left Arrow / A: left flipper
+- Right Arrow / D: right flipper
+- Hold and release Space or the Launch button to serve
 - R or Start: reset the game
-- Use the on-screen flipper buttons on phones
+- On phones, hold the on-screen flipper buttons
 
-The flippers are deliberately separated with a drain gap between them. The table has bumpers, sling kickers, a visible loop ramp that carries the ball around and returns it to play, Christmas-tree lights, candy-cane rail accents, snowfall, synthesized sound effects, lives, score, and a locally saved high score.
+The game includes a Christmas tree playfield, ornaments, presents, snowfall, candy-cane rails, bumpers, angled lower guide rails that funnel toward separated flippers, an animated loop ramp, synthesized sound effects, a saved high score, and multiball after three completed loop rides.
