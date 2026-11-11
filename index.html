@@ -14,7 +14,7 @@
 <section class="cabinet"><canvas id="game" width="800" height="1000" aria-label="Christmas pinball playfield"></canvas></section>
 <div class="controls"><button id="start">▶ Start game</button><button id="launch" class="secondary">⤴ Hold to launch</button><button id="sound" class="secondary">🔊 Sound on</button></div>
 <div class="flippers"><button id="left">◀ LEFT FLIPPER</button><button id="right">RIGHT FLIPPER ▶</button></div>
-<p class="help"><strong>Controls:</strong> ← / A and → / D for flippers · hold/release Space to launch · R for a new game. Phone: use the buttons. The launch lane is open; sloped guides feed the ball to the flippers. Three ramps return the ball to different areas.</p>
+<p class="help"><strong>Controls:</strong> ← / A and → / D for flippers · hold/release Space to launch · R for a new game. Phone: use the buttons. Bumpers use real bounce physics; no ramps or scripted ball rides.</p>
 </main>
 <script>
 (()=>{'use strict';
@@ -24,76 +24,79 @@ const startBtn=document.querySelector('#start'),launchBtn=document.querySelector
 const W=800,H=1000,keys={left:false,right:false,plunger:false};
 let score=0,lives=3,best=0,state='title',muted=false,audio=null,charge=0,frame=0,shake=0;
 try{best=Number(localStorage.getItem('xmasPinballBest'))||0}catch(_){}bestEl.textContent=best;
-const ball={x:708,y:875,r:11,vx:0,vy:0,active:false,inLane:true,trail:[],cooldown:0,ramp:null,rampT:0,rampCooldown:0};
-const bumpers=[{x:285,y:230,r:30,color:'#ed4652',points:100,cool:0},{x:400,y:190,r:32,color:'#ffd452',points:150,cool:0},{x:515,y:230,r:30,color:'#39c879',points:100,cool:0},{x:240,y:410,r:28,color:'#ffd452',points:125,cool:0},{x:560,y:410,r:28,color:'#ed4652',points:125,cool:0}];
-// Short, mirrored paddles have a clear gap between their inner tips in both positions.
-const flippers={left:{x:245,y:855,length:125,angle:.08,pressed:false},right:{x:555,y:855,length:125,angle:Math.PI-.08,pressed:false}};
-// The right-hand shooter lane is separated until y=155, where it opens directly onto the upper playfield.
-const walls=[[55,55,55,780],[745,55,745,900],[55,55,745,55],[55,780,180,850],[180,850,245,875],[745,780,620,850],[620,850,555,875],[675,155,675,900],[55,900,175,965],[625,965,745,900]];
-const slings=[[105,610,205,700],[695,610,595,700]];
-const ramps=[
- {name:'CANDY CANE LOOP',entry:{x:160,y:345},exit:{x:600,y:665},control:{x:115,y:185},color:'#ff7180'},
- {name:'NORTH POLE SPIRAL',entry:{x:640,y:345},exit:{x:205,y:665},control:{x:690,y:165},color:'#76eaff'},
- {name:'STAR TUNNEL',entry:{x:400,y:300},exit:{x:400,y:735},control:{x:400,y:105},color:'#ffe27a'}
+const ball={x:705,y:875,r:11,vx:0,vy:0,active:false,inLane:true,trail:[],paddleLock:0};
+const bumpers=[
+ {x:270,y:240,r:31,color:'#ed4652',points:100,flash:0},
+ {x:400,y:195,r:34,color:'#ffd452',points:150,flash:0},
+ {x:530,y:240,r:31,color:'#39c879',points:100,flash:0},
+ {x:245,y:425,r:29,color:'#ffd452',points:125,flash:0},
+ {x:555,y:425,r:29,color:'#ed4652',points:125,flash:0}
 ];
-const snow=Array.from({length:95},()=>({x:Math.random()*W,y:Math.random()*H,r:1+Math.random()*2.2,s:.45+Math.random()*1.5,p:Math.random()*7}));
+// Pivots and angles are mirrored; the active inner tips stay apart, leaving a playable drain gap.
+const flippers={left:{x:300,y:850,length:145,angle:-.10,rest:-.10,raised:-.62,pressed:false},right:{x:500,y:850,length:145,angle:Math.PI+.10,rest:Math.PI+.10,raised:Math.PI+.62,pressed:false}};
+// Static playfield rails. The two lower guides slope down and inward toward the flippers.
+const walls=[
+ [55,55,55,780],[745,55,745,900],[55,55,745,55],
+ [55,650,95,745],[95,745,235,835], [745,650,705,745],[705,745,565,835],
+ [650,165,650,820],
+ [55,950,255,950],[545,950,745,950]
+];
+const slings=[[105,610,205,700],[695,610,595,700]];
+const snow=Array.from({length:90},()=>({x:Math.random()*W,y:Math.random()*H,r:1+Math.random()*2.2,s:.45+Math.random()*1.5,p:Math.random()*7}));
 function tone(freq=400,dur=.08,type='sine',vol=.025){if(muted)return;try{audio ||= new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(vol,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+dur);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+dur)}catch(_){}}
 function updateHud(){scoreEl.textContent=score;livesEl.textContent=lives;if(score>best){best=score;bestEl.textContent=best;try{localStorage.setItem('xmasPinballBest',best)}catch(_){}}}
-function resetBall(){Object.assign(ball,{x:708,y:875,vx:0,vy:0,active:false,inLane:true,trail:[],cooldown:0,ramp:null,rampT:0,rampCooldown:0});charge=0;state='ready';startBtn.textContent='↻ New game'}
-function newGame(){score=0;lives=3;bumpers.forEach(b=>b.cool=0);updateHud();resetBall();tone(660,.1)}
-function launch(){if(state==='title'||state==='over')newGame();if(state!=='ready')return;ball.active=true;ball.inLane=true;ball.vx=0;ball.vy=-14-Math.min(charge,48)*.12;state='playing';charge=0;tone(220,.13,'triangle',.05)}
+function resetBall(){Object.assign(ball,{x:705,y:875,vx:0,vy:0,active:false,inLane:true,trail:[],paddleLock:0});charge=0;state='ready';startBtn.textContent='↻ New game'}
+function newGame(){score=0;lives=3;bumpers.forEach(b=>b.flash=0);updateHud();resetBall();tone(660,.1)}
+function launch(){if(state==='title'||state==='over')newGame();if(state!=='ready')return;ball.active=true;ball.inLane=true;ball.vx=0;ball.vy=-13-Math.min(charge,48)*.12;state='playing';charge=0;tone(220,.13,'triangle',.05)}
 function award(n){score+=n;updateHud()}
-function hitSegment(x1,y1,x2,y2,restitution=.78,thickness=0){const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;if(!l2)return false;const t=Math.max(0,Math.min(1,((ball.x-x1)*dx+(ball.y-y1)*dy)/l2)),px=x1+t*dx,py=y1+t*dy,nx=ball.x-px,ny=ball.y-py,d=Math.hypot(nx,ny),reach=ball.r+thickness;if(d>=reach||d<.001)return false;const ux=nx/d,uy=ny/d;ball.x=px+ux*(reach+.5);ball.y=py+uy*(reach+.5);const vn=ball.vx*ux+ball.vy*uy;if(vn<0){ball.vx-=(1+restitution)*vn*ux;ball.vy-=(1+restitution)*vn*uy}return true}
-function paddleCollision(f,side){const ex=f.x+Math.cos(f.angle)*f.length,ey=f.y+Math.sin(f.angle)*f.length;if(!hitSegment(f.x,f.y,ex,ey,.38,7))return;if(f.pressed){ball.vy=Math.min(ball.vy,-10.5);ball.vx+=(side==='left'?2.4:-2.4)+(ball.x-f.x)*.018;if(ball.cooldown<=0){award(10);ball.cooldown=7;tone(330,.04,'square',.015)}}else if(ball.cooldown<=0){ball.cooldown=5}}
-function bumperCollision(){for(const b of bumpers){const dx=ball.x-b.x,dy=ball.y-b.y,d=Math.hypot(dx,dy),min=ball.r+b.r;if(d>=min||d<.001)continue;const nx=dx/d,ny=dy/d;ball.x=b.x+nx*(min+.5);ball.y=b.y+ny*(min+.5);const vn=ball.vx*nx+ball.vy*ny;if(vn<0){ball.vx-=1.9*vn*nx;ball.vy-=1.9*vn*ny}ball.vx+=nx*1.1;ball.vy+=ny*1.1;if(b.cool<=0){award(b.points);b.cool=15;shake=3;tone(540+Math.random()*220,.08,'sine',.035)}}}
-function enterRamp(r){ball.ramp=r;ball.rampT=0;ball.vx=ball.vy=0;ball.trail=[];ball.rampCooldown=100;tone(560,.08,'triangle',.03)}
-function updateRamp(){const r=ball.ramp;ball.rampT+=1/55;const t=Math.min(1,ball.rampT),u=1-t;ball.x=u*u*r.entry.x+2*u*t*r.control.x+t*t*r.exit.x;ball.y=u*u*r.entry.y+2*u*t*r.control.y+t*t*r.exit.y;if(t>=1){ball.ramp=null;ball.x=r.exit.x;ball.y=r.exit.y;ball.vx=r.exit.x<350?4:r.exit.x>450?-4:(Math.random()<.5?-3:3);ball.vy=7;award(350);tone(850,.15,'triangle',.035)}}
-function update(){frame++;if(shake>0)shake*=.82;bumpers.forEach(b=>{if(b.cool>0)b.cool--});snow.forEach(s=>{s.y+=s.s;s.x+=Math.sin(frame*.012+s.p)*.2;if(s.y>H+4){s.y=-4;s.x=Math.random()*W}});if(keys.plunger&&state==='ready')charge=Math.min(48,charge+.8);if(state!=='playing'||!ball.active)return;if(ball.cooldown>0)ball.cooldown--;if(ball.rampCooldown>0)ball.rampCooldown--;
- if(ball.ramp){updateRamp();return}
- // Substeps prevent the fast-launched ball tunnelling through rails or bumpers.
- ball.trail.push({x:ball.x,y:ball.y});if(ball.trail.length>8)ball.trail.shift();ball.vy+=.19;ball.vx*=.999;ball.vy*=.999;const speed=Math.hypot(ball.vx,ball.vy);if(speed>21){ball.vx*=21/speed;ball.vy*=21/speed}const steps=Math.max(1,Math.ceil(Math.hypot(ball.vx,ball.vy)/5));
- for(let i=0;i<steps;i++){
-  ball.x+=ball.vx/steps;ball.y+=ball.vy/steps;
+// Circle vs capsule (line segment with radius). Reflect only when the ball is moving into the surface.
+function collideSegment(x1,y1,x2,y2,restitution=.78,radius=0){const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;if(!l2)return false;const t=Math.max(0,Math.min(1,((ball.x-x1)*dx+(ball.y-y1)*dy)/l2)),px=x1+t*dx,py=y1+t*dy,nx=ball.x-px,ny=ball.y-py,d=Math.hypot(nx,ny),min=ball.r+radius;if(d>=min||d<1e-6)return false;const ux=nx/d,uy=ny/d;ball.x=px+ux*(min+.15);ball.y=py+uy*(min+.15);const vn=ball.vx*ux+ball.vy*uy;if(vn<0){ball.vx-=(1+restitution)*vn*ux;ball.vy-=(1+restitution)*vn*uy}return true}
+function collideBumpers(){for(const b of bumpers){const dx=ball.x-b.x,dy=ball.y-b.y,d=Math.hypot(dx,dy),min=ball.r+b.r;if(d>=min||d<1e-6)continue;const nx=dx/d,ny=dy/d;ball.x=b.x+nx*(min+.2);ball.y=b.y+ny*(min+.2);const vn=ball.vx*nx+ball.vy*ny;if(vn<0){const impulse=-(1+1.02)*vn;ball.vx+=impulse*nx;ball.vy+=impulse*ny}
+ // Real bumper kick: add a short outward impulse on contact, not on a timer.
+ ball.vx+=nx*3.2;ball.vy+=ny*3.2;if(b.flash<=0){award(b.points);b.flash=12;shake=3;tone(520+Math.random()*240,.08,'sine',.04)}}}
+function collideFlipper(f,side){const ex=f.x+Math.cos(f.angle)*f.length,ey=f.y+Math.sin(f.angle)*f.length;if(!collideSegment(f.x,f.y,ex,ey,.72,8))return;if(f.pressed){const lift=Math.max(8,Math.abs(ball.vy)*.8);ball.vy=-lift;ball.vx+=(side==='left'?2.4:-2.4)+(ball.x-f.x)*.012;if(ball.paddleLock<=0){award(10);ball.paddleLock=7;tone(300,.035,'square',.014)}}}
+function update(){frame++;if(shake>0)shake*=.8;if(ball.paddleLock>0)ball.paddleLock--;bumpers.forEach(b=>{if(b.flash>0)b.flash--});snow.forEach(s=>{s.y+=s.s;s.x+=Math.sin(frame*.012+s.p)*.2;if(s.y>H+4){s.y=-4;s.x=Math.random()*W}});if(keys.plunger&&state==='ready')charge=Math.min(48,charge+.75);if(state!=='playing'||!ball.active)return;
+ flippers.left.angle=flippers.left.pressed?flippers.left.raised:flippers.left.rest;flippers.right.angle=flippers.right.pressed?flippers.right.raised:flippers.right.rest;
+ ball.trail.push({x:ball.x,y:ball.y});if(ball.trail.length>8)ball.trail.shift();
+ // Gravity and modest air drag; fixed 1/120 s substeps keep fast balls from tunnelling through bumpers.
+ const substeps=2,dt=1/substeps;for(let step=0;step<substeps;step++){
+  ball.vy+=.19*dt;ball.vx*=.9995;ball.vy*=.9995;ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;
   if(ball.inLane){
-   // Solid outside wall and lane divider keep the launch path unobstructed. At the open top, merge into play.
-   hitSegment(745,55,745,900,.8,2);hitSegment(675,155,675,900,.8,2);
-   if(ball.y<145){ball.inLane=false;ball.x=665;ball.y=150;ball.vx=-5.5;ball.vy=4.5}
+   // Shooter lane has only side rails. Its top opens into the table and redirects the serve leftward.
+   collideSegment(650,165,650,875,.78,2);collideSegment(745,55,745,900,.78,2);
+   if(ball.y<155){ball.inLane=false;ball.x=638;ball.y=158;ball.vx=-5.8;ball.vy=4.2}
   }else{
-   for(const w of walls){if(w[0]===675)continue;hitSegment(...w,.8,2)}
-   for(const s of slings){if(hitSegment(...s,.88,4)&&ball.cooldown<=0){ball.vy-=2;award(25);ball.cooldown=10;tone(390,.05,'triangle',.02)}}
-   bumperCollision();flippers.left.angle=flippers.left.pressed?-.55:.08;flippers.right.angle=flippers.right.pressed?Math.PI+.55:Math.PI-.08;paddleCollision(flippers.left,'left');paddleCollision(flippers.right,'right');
-   if(ball.rampCooldown<=0&&ball.vy>0){for(const r of ramps){if(Math.hypot(ball.x-r.entry.x,ball.y-r.entry.y)<23){enterRamp(r);break}}}
+   for(const w of walls)collideSegment(...w,.78,2);
+   for(const s of slings){if(collideSegment(...s,.88,5)){ball.vy-=1.4;award(25);tone(390,.05,'triangle',.02)}}
+   collideBumpers();collideFlipper(flippers.left,'left');collideFlipper(flippers.right,'right');
   }
-  if(ball.ramp)break;
  }
- // Gravity and small nudges keep slow balls moving toward the lower flippers rather than wedged on a guide.
- if(!ball.ramp&&Math.hypot(ball.vx,ball.vy)<1.4){ball.vx+=(ball.x<400?1:-1)*.65;ball.vy=Math.max(ball.vy,2)}
- if(ball.y-ball.r>990){lives--;updateHud();tone(120,.22,'sawtooth',.04);if(lives<=0){state='over';ball.active=false;startBtn.textContent='▶ Play again'}else resetBall()}
+ // A tiny minimum speed prevents numerical settling; gravity still determines the natural motion.
+ if(Math.hypot(ball.vx,ball.vy)<.7){ball.vx+=(ball.x<400?1:-1)*.45;ball.vy+=.45}
+ if(ball.y-ball.r>980){lives--;updateHud();tone(120,.22,'sawtooth',.04);if(lives<=0){state='over';ball.active=false;startBtn.textContent='▶ Play again'}else resetBall()}
 }
 function line(x1,y1,x2,y2,color,width){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.stroke()}
 function drawTree(){ctx.fillStyle='#704323';ctx.fillRect(385,440,30,58);for(let i=0;i<4;i++){const y=165+i*64,w=80+i*23;ctx.beginPath();ctx.moveTo(400,y);ctx.lineTo(400-w,y+120);ctx.lineTo(400+w,y+120);ctx.closePath();ctx.fillStyle=['#138547','#08733d','#15934d','#086936'][i];ctx.fill();ctx.strokeStyle='#7ed79a';ctx.lineWidth=3;ctx.stroke();for(let j=0;j<5;j++){const x=400-w*.55+j*w*.27,oy=y+72+(j%2)*22;ctx.beginPath();ctx.arc(x,oy,5.5,0,Math.PI*2);ctx.fillStyle=['#f34b58','#f8df72','#8be8ff'][j%3];ctx.fill()}}ctx.fillStyle='#ffe876';ctx.font='34px serif';ctx.textAlign='center';ctx.fillText('★',400,170)}
-function drawRamp(r){ctx.save();ctx.shadowColor=r.color;ctx.shadowBlur=12;ctx.strokeStyle='#d5efff';ctx.lineWidth=11;ctx.beginPath();ctx.moveTo(r.entry.x,r.entry.y);ctx.quadraticCurveTo(r.control.x,r.control.y,r.exit.x,r.exit.y);ctx.stroke();ctx.shadowBlur=0;ctx.strokeStyle=r.color;ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(r.entry.x,r.entry.y);ctx.quadraticCurveTo(r.control.x,r.control.y,r.exit.x,r.exit.y);ctx.stroke();ctx.fillStyle='#fff0a0';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.fillText(r.name,(r.entry.x+r.exit.x+r.control.x)/3,(r.entry.y+r.exit.y+r.control.y)/3-10);ctx.restore()}
-function draw(){ctx.clearRect(0,0,W,H);const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#0c583c');bg.addColorStop(.6,'#0a382a');bg.addColorStop(1,'#071c1c');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);for(const s of snow){ctx.globalAlpha=.35+s.r*.15;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;ctx.save();if(shake>0)ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);ctx.fillStyle='#09271f';ctx.fillRect(55,55,690,845);drawTree();ctx.fillStyle='#071b1c';ctx.fillRect(675,55,70,845);
+function draw(){ctx.clearRect(0,0,W,H);const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#0c583c');bg.addColorStop(.6,'#0a382a');bg.addColorStop(1,'#071c1c');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);for(const s of snow){ctx.globalAlpha=.35+s.r*.15;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;ctx.save();if(shake>0)ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);ctx.fillStyle='#09271f';ctx.fillRect(55,55,690,845);drawTree();ctx.fillStyle='#071b1c';ctx.fillRect(650,55,95,845);
  for(const w of walls){line(...w,'#e9fbff',9);line(...w,'#d83a47',2)}
- // The shooter divider ends at y=155. This opening is the ball's clear route out of the launch lane.
- line(675,155,675,900,'#e9fbff',9);line(675,155,675,900,'#d83a47',2);
- for(const r of ramps)drawRamp(r);
+ // Shooter divider ends at the exit; the ball can leave above y=155.
+ line(650,165,650,875,'#e9fbff',8);line(650,165,650,875,'#d83a47',2);
  for(let i=0;i<18;i++){const x=68+i*38;for(const y of [65,890]){ctx.beginPath();ctx.arc(x,y,4.5,0,Math.PI*2);ctx.fillStyle=['#fb4a53','#ffe371','#75e9a1'][i%3];ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=9;ctx.fill()}}ctx.shadowBlur=0;
  slings.forEach(s=>{line(...s,'#ffe371',13);line(...s,'#d83a47',4)});
- bumpers.forEach((b,i)=>{const g=ctx.createRadialGradient(b.x,b.y,6,b.x,b.y,b.r+15);g.addColorStop(0,'#fff');g.addColorStop(.25,b.color);g.addColorStop(1,'#fff0');ctx.fillStyle=g;ctx.beginPath();ctx.arc(b.x,b.y,b.r+15,0,Math.PI*2);ctx.fill();ctx.fillStyle=b.color;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff1bc';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='white';ctx.font='bold 15px system-ui';ctx.textAlign='center';ctx.fillText(['❄','★','❄','🎁','★'][i],b.x,b.y+5)});
- // Angled guides form a funnel; the paddle tips stop short of one another, leaving a playable drain gap.
+ bumpers.forEach((b,i)=>{const g=ctx.createRadialGradient(b.x,b.y,6,b.x,b.y,b.r+15);g.addColorStop(0,'#fff');g.addColorStop(.25,b.color);g.addColorStop(1,'#fff0');ctx.fillStyle=g;ctx.beginPath();ctx.arc(b.x,b.y,b.r+15,0,Math.PI*2);ctx.fill();ctx.fillStyle=b.color;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle=b.flash>0?'#fff':'#fff1bc';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='white';ctx.font='bold 15px system-ui';ctx.textAlign='center';ctx.fillText(['❄','★','❄','🎁','★'][i],b.x,b.y+5)});
+ // Angled guides converge toward separated flippers; the missing center rail is the drain.
  for(const side of ['left','right']){const f=flippers[side],ex=f.x+Math.cos(f.angle)*f.length,ey=f.y+Math.sin(f.angle)*f.length;line(f.x,f.y,ex,ey,'#fff3ca',25);line(f.x,f.y,ex,ey,f.pressed?'#ff5260':(side==='left'?'#d83a47':'#28a969'),7);ctx.beginPath();ctx.arc(f.x,f.y,12,0,Math.PI*2);ctx.fillStyle='#ffe27a';ctx.fill()}
  ctx.fillStyle='#94c9b8';ctx.fillRect(691,850,22,44);ctx.fillStyle='#ffdf75';ctx.fillRect(696,886-Math.min(charge,48)*.48,12,Math.max(4,charge*.48));
  if(ball.active){ball.trail.forEach((p,i)=>{ctx.globalAlpha=(i+1)/ball.trail.length*.28;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(p.x,p.y,ball.r*.7,0,Math.PI*2);ctx.fill()});ctx.globalAlpha=1;const g=ctx.createRadialGradient(ball.x-4,ball.y-5,1,ball.x,ball.y,ball.r);g.addColorStop(0,'#fff');g.addColorStop(1,'#9bb6cb');ctx.fillStyle=g;ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke()}
- ctx.fillStyle='#ffdf75';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText('SHOOTER LANE',710,925);ctx.restore();
- if(state!=='playing'){ctx.fillStyle='#00130fbc';ctx.fillRect(55,55,690,845);ctx.textAlign='center';ctx.fillStyle='#ffdf75';ctx.font='bold 43px system-ui';ctx.fillText(state==='title'?'🎄 CHRISTMAS PINBALL':state==='over'?'GAME OVER':'READY!',400,410);ctx.fillStyle='#fff';ctx.font='17px system-ui';ctx.fillText(state==='title'?'Open shooter lane · three ramps · sloped guides':state==='over'?`Final score: ${score} · tap Play again`:'Hold and release Space / Launch to serve',400,452);ctx.font='15px system-ui';ctx.fillStyle='#c8f4dc';ctx.fillText(state==='title'?'Start a game, then hold/release to launch':'A / ← and D / → work the separated flippers',400,487)}
+ ctx.fillStyle='#ffdf75';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText('SHOOTER LANE',700,925);ctx.restore();
+ if(state!=='playing'){ctx.fillStyle='#00130fbc';ctx.fillRect(55,55,690,845);ctx.textAlign='center';ctx.fillStyle='#ffdf75';ctx.font='bold 43px system-ui';ctx.fillText(state==='title'?'🎄 CHRISTMAS PINBALL':state==='over'?'GAME OVER':'READY!',400,410);ctx.fillStyle='#fff';ctx.font='17px system-ui';ctx.fillText(state==='title'?'Bouncing bumpers · fair flippers · no fake ramps':state==='over'?`Final score: ${score} · tap Play again`:'Hold and release Space / Launch to serve',400,452);ctx.font='15px system-ui';ctx.fillStyle='#c8f4dc';ctx.fillText(state==='title'?'Start a game, then hold/release to launch':'A / ← and D / → work the separated flippers',400,487)}
 }
 let last=0,acc=0;function loop(now){acc+=Math.min(.05,(now-last)/1000||0);last=now;while(acc>=1/60){update();acc-=1/60}draw();requestAnimationFrame(loop)}
 function setFlipper(side,on){flippers[side].pressed=on;keys[side]=on}
-function down(e){const k=e.key.toLowerCase();if([' ','arrowleft','arrowright'].includes(k))e.preventDefault();if(k==='arrowleft'||k==='a')setFlipper('left',true);if(k==='arrowright'||k==='d')setFlipper('right',true);if(k===' '){keys.plunger=true;if(state==='title'||state==='over')newGame()}if(k==='r')newGame()}
-function up(e){const k=e.key.toLowerCase();if(k==='arrowleft'||k==='a')setFlipper('left',false);if(k==='arrowright'||k==='d')setFlipper('right',false);if(k===' '){keys.plunger=false;if(state==='ready')launch()}}
+function keyDown(e){const k=e.key.toLowerCase();if([' ','arrowleft','arrowright'].includes(k))e.preventDefault();if(k==='arrowleft'||k==='a')setFlipper('left',true);if(k==='arrowright'||k==='d')setFlipper('right',true);if(k===' '){keys.plunger=true;if(state==='title'||state==='over')newGame()}if(k==='r')newGame()}
+function keyUp(e){const k=e.key.toLowerCase();if(k==='arrowleft'||k==='a')setFlipper('left',false);if(k==='arrowright'||k==='d')setFlipper('right',false);if(k===' '){keys.plunger=false;if(state==='ready')launch()}}
 function bindHold(el,side){el.addEventListener('pointerdown',e=>{e.preventDefault();try{el.setPointerCapture(e.pointerId)}catch(_){}setFlipper(side,true)});for(const ev of ['pointerup','pointercancel','lostpointercapture'])el.addEventListener(ev,()=>setFlipper(side,false))}
-window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',()=>{setFlipper('left',false);setFlipper('right',false);keys.plunger=false});bindHold(document.querySelector('#left'),'left');bindHold(document.querySelector('#right'),'right');
+window.addEventListener('keydown',keyDown);window.addEventListener('keyup',keyUp);window.addEventListener('blur',()=>{setFlipper('left',false);setFlipper('right',false);keys.plunger=false});bindHold(document.querySelector('#left'),'left');bindHold(document.querySelector('#right'),'right');
 startBtn.addEventListener('click',newGame);launchBtn.addEventListener('pointerdown',e=>{e.preventDefault();if(state==='title'||state==='over')newGame();keys.plunger=true});for(const ev of ['pointerup','pointercancel','lostpointercapture'])launchBtn.addEventListener(ev,()=>{keys.plunger=false;if(state==='ready')launch()});soundBtn.addEventListener('click',()=>{muted=!muted;soundBtn.textContent=muted?'🔇 Sound off':'🔊 Sound on';if(!muted)tone(700,.08)});canvas.addEventListener('pointerdown',()=>{if(state==='title'||state==='over')newGame();else if(state==='ready')launch()});updateHud();requestAnimationFrame(loop);
 })();
 </script></body></html>

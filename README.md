@@ -9,4 +9,4 @@ Open `index.html` in a modern browser. It is a standalone HTML game with no depe
 - R or Start: reset the game
 - On phones, hold the on-screen flipper buttons
 
-The game uses a fixed-step physics loop with substeps to reduce tunnelling, collidable bumpers and slingshots, separate flippers with an open drain, sloped lower guides, an unobstructed shooter lane with an open exit into the playfield, and three animated ramps with different return locations.
+The game has no scripted ramps. The ball moves under gravity, collides against table rails and flippers, and gets a real outward bounce and score from bumper collisions. The shooter lane is open at the top, and sloped lower guides feed toward two separated flippers.
